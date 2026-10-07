@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="vi"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nhà kính thông minh ESP32 – 3D</title>
+<style>
+:root{--pn:rgba(14,24,28,.86);--fg:#e8f1ef;--ac:#63d896;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--pn:rgba(14,24,28,.86);--fg:#e8f1ef;--ac:#63d896}}
+:root[data-theme="dark"]{--pn:rgba(14,24,28,.86);--fg:#e8f1ef;--ac:#63d896}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+html,body{height:100%;margin:0}
+body{position:relative;overflow:hidden;background:#16212a;color:var(--fg);font:13px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+canvas{display:block}
+#hud{position:absolute;top:10px;left:10px;width:min(300px,calc(100% - 20px));padding:10px 12px;background:var(--pn);border-radius:10px;backdrop-filter:blur(6px)}
+#hud h1{font-size:14px;margin:0 0 6px}
+#hud label{display:grid;grid-template-columns:82px 1fr 40px;align-items:center;gap:6px;margin:3px 0}
+#hud input{width:100%;accent-color:var(--ac)}
+#out{white-space:pre-line;margin-top:6px;color:var(--ac);font-weight:600}
+#nav{position:absolute;bottom:12px;left:10px;right:10px;display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+#nav button{border:0;border-radius:16px;padding:8px 14px;background:var(--pn);color:var(--fg);font:inherit;cursor:pointer}
+#nav button:focus-visible{outline:2px solid var(--ac)}
+</style></head><body>
+<div id="hud"><h1>Nhà kính thông minh ESP32</h1>
+<label>Nhiệt độ<input id="rt" type="range" min="20" max="45" value="34"><span id="vt"></span></label>
+<label>Đất Zone 1<input id="r1" type="range" min="0" max="100" value="25"><span id="v1"></span></label>
+<label>Đất Zone 2<input id="r2" type="range" min="0" max="100" value="60"><span id="v2"></span></label>
+<div id="out"></div></div>
+<div id="nav"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+const T=THREE,$=i=>document.getElementById(i),V=(x,y,z)=>new T.Vector3(x,y,z);
+const R=new T.WebGLRenderer({antialias:true}),BW=()=>document.body.clientWidth,BH=()=>document.body.clientHeight;
+R.setPixelRatio(Math.min(devicePixelRatio,2));R.setSize(BW(),BH());R.shadowMap.enabled=true;R.shadowMap.type=T.PCFSoftShadowMap;R.outputEncoding=T.sRGBEncoding;R.toneMapping=T.ACESFilmicToneMapping;R.toneMappingExposure=.9;
+document.body.prepend(R.domElement);
+const S=new T.Scene();S.background=new T.Color(0x16212a);S.fog=new T.Fog(0x16212a,40,105);
+const C=new T.PerspectiveCamera(45,BW()/BH(),.05,250);C.position.set(16,9,18);
+const O=new T.OrbitControls(C,R.domElement);O.target.set(2,2.5,0);O.enableDamping=true;O.maxPolarAngle=1.54;O.minDistance=.3;O.maxDistance=55;
+/* ---------- helpers ---------- */
+const M=(c,r=.5,m=0,o={})=>new T.MeshStandardMaterial(Object.assign({color:c,roughness:r,metalness:m},o)),MC={},wm=c=>MC[c]||(MC[c]=M(c,.45));
+const ST=M(0x0f1114,.32,.85),gold=M(0xd9b24a,.25,1),silver=M(0xc3c8cc,.25,.95);
+const glass=new T.MeshPhysicalMaterial({color:0xc6e6ee,transparent:true,opacity:.17,roughness:.03,side:T.DoubleSide,depthWrite:false,envMapIntensity:1.5});
+const sh=m=>(m.castShadow=m.receiveShadow=true,m);
+const bx=(w,h,d,mt,x,y,z,p=S)=>{const m=sh(new T.Mesh(new T.BoxGeometry(w,h,d),mt));m.position.set(x,y,z);p.add(m);return m};
+const cy=(r,h,mt,x,y,z,p=S,ax='y',r2=r)=>{const m=sh(new T.Mesh(new T.CylinderGeometry(r,r2,h,28),mt));m.position.set(x,y,z);if(ax=='x')m.rotation.z=1.5708;if(ax=='z')m.rotation.x=1.5708;p.add(m);return m};
+const bm=(a,b,t,mt)=>{a=V(...a);b=V(...b);const m=sh(new T.Mesh(new T.BoxGeometry(t,t,a.distanceTo(b)),mt));m.position.addVectors(a,b).multiplyScalar(.5);m.lookAt(b);S.add(m)};
+const rod=(a,b,r,mt,p=S)=>{a=V(...a);b=V(...b);const d=b.clone().sub(a);if(d.length()<1e-4)return;const m=sh(new T.Mesh(new T.CylinderGeometry(r,r,d.length(),10),mt));m.position.addVectors(a,b).multiplyScalar(.5);m.quaternion.setFromUnitVectors(V(0,1,0),d.normalize());p.add(m)};
+const pipe=(P,r,mt,p=S)=>P.forEach((q,i)=>{if(i)rod(P[i-1],q,r,mt,p);if(i&&i<P.length-1){const s=sh(new T.Mesh(new T.SphereGeometry(r*1.04,10,8),mt));s.position.set(q[0],q[1],q[2]);p.add(s)}});
+const tag=(t,x,y,z,h,p=S,col='#fff')=>{const c=document.createElement('canvas');c.width=512;c.height=128;const g=c.getContext('2d');g.font='bold 66px system-ui,sans-serif';g.textAlign='center';g.textBaseline='middle';g.lineWidth=14;g.strokeStyle='rgba(0,0,0,.7)';g.strokeText(t,256,64);g.fillStyle=col;g.fillText(t,256,64);const tx=new T.CanvasTexture(c);tx.encoding=T.sRGBEncoding;const s=new T.Sprite(new T.SpriteMaterial({map:tx,transparent:true,depthWrite:false}));s.position.set(x,y,z);s.scale.set(h*4,h,1);p.add(s)};
+/* ---------- ánh sáng & môi trường ---------- */
+const pm=new T.PMREMGenerator(R),es=new T.Scene();es.background=new T.Color(0x3d5260);
+[[0,9,0,16,.5,16,0xffffff,2.8],[11,3,0,.5,7,14,0xfff0d8,3],[-11,3,3,.5,7,12,0xd0e6ff,2.5]].forEach(([x,y,z,w,h,d,c,k])=>{const m=new T.Mesh(new T.BoxGeometry(w,h,d),new T.MeshBasicMaterial({color:new T.Color(c).multiplyScalar(k)}));m.position.set(x,y,z);es.add(m)});
+S.environment=pm.fromScene(es,.03).texture;
+S.add(new T.HemisphereLight(0xcfe0f0,0x3a4a3c,.45));
+const sun=new T.DirectionalLight(0xfff0d6,1.4);sun.position.set(13,22,11);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-17,right:17,top:17,bottom:-17,near:1,far:70});sun.shadow.bias=-.0004;S.add(sun);
+/* ---------- nền, khung thép, kính ---------- */
+const gr=new T.Mesh(new T.PlaneGeometry(160,160),M(0x2b3a2f,1));gr.rotation.x=-1.5708;gr.receiveShadow=true;S.add(gr);
+bx(10.8,.12,10.8,M(0x5b605d,.9),0,.06,0);bx(5.2,.1,9,M(0x4d514f,.95),8,.05,0);
+for(const x of[-5,5]){for(const z of[-5,0,5]){bm([x,0,z],[x,4,z],.18,ST);bm([x,4,z],[0,6,z],.14,ST)}
+ bm([x,4,-5],[x,4,5],.16,ST);bm([x,.08,-5],[x,.08,5],.16,ST);bm([x,2,-5],[x,2,5],.1,ST);bm([x/2,5,-5],[x/2,5,5],.1,ST)}
+bm([0,6,-5],[0,6,5],.18,ST);bm([-5,3.2,0],[5,3.2,0],.1,ST);
+for(const z of[-5,0,5])bm([-5,.08,z],[5,.08,z],.16,ST);
+for(const z of[-5,5]){bm([-5,2,z],[5,2,z],.1,ST);for(const x of[-2.5,2.5])bm([x,0,z],[x,5,z],.1,ST)}
+const gp=(g,x,y,z,ry=0,rz=0)=>{const m=new T.Mesh(g,glass);m.position.set(x,y,z);m.rotation.set(0,ry,rz);S.add(m)};
+for(const x of[-5,5])gp(new T.PlaneGeometry(10,4),x,2,0,1.5708);
+const gab=new T.ShapeGeometry(new T.Shape([[-5,0],[5,0],[5,4],[0,6],[-5,4]].map(p=>new T.Vector2(p[0],p[1]))));
+for(const z of[-5,5])gp(gab,0,0,z);
+const ra=Math.atan(.4),rg=new T.PlaneGeometry(Math.hypot(5,2),10).rotateX(-1.5708);
+gp(rg,-2.5,5,0,0,ra);gp(rg,2.5,5,0,0,-ra);gp(new T.PlaneGeometry(10,3.2),0,1.6,0);
+/* ---------- luống cây ---------- */
+const soilM=M(0x3d2a1b,1),bedM=M(0x2f3338,.5,.7);
+for(const z of[-2.5,2.5]){bx(8.3,.5,3.6,bedM,0,.25,z);bx(8,.56,3.3,soilM,0,.28,z)}
+const lf=new T.InstancedMesh(new T.SphereGeometry(.3,12,9),M(0xffffff,.7),168),fr=new T.InstancedMesh(new T.SphereGeometry(.09,8,6),M(0xd8322b,.35),56);
+{let i=0,j=0;const mx=new T.Matrix4(),q=new T.Quaternion(),cl=new T.Color();
+for(const zc of[-2.5,2.5])for(let a=0;a<7;a++)for(let b=0;b<4;b++){const x=-3.6+a*1.2,z=zc-1.2+b*.8,h=.4+Math.random()*.35;
+ for(let k=0;k<3;k++){const s=.8+Math.random()*.5;mx.compose(V(x+(k-1)*.18,.56+h*.6+k*.05,z+(Math.random()-.5)*.2),q,V(s,s*1.2,s));lf.setMatrixAt(i,mx);lf.setColorAt(i++,cl.setHSL(.26+Math.random()*.08,.6,.2+Math.random()*.12))}
+ mx.compose(V(x+.15,.56+h*.45,z+.2),q,V(1,1,1));fr.setMatrixAt(j++,mx)}}
+lf.instanceColor.needsUpdate=true;lf.castShadow=lf.receiveShadow=fr.castShadow=true;S.add(lf,fr);
+tag('ZONE 1',0,1.9,2.5,.5);tag('ZONE 2',0,1.9,-2.5,.5);
+/* ---------- cảm biến đất ---------- */
+function soil(x,z,n,yc){const g=new T.Group();g.position.set(x,.56,z);S.add(g);const pc=M(0x14161a,.5);
+ for(const s of[-1,1]){bx(.07,.78,.016,pc,s*.07,-.1,0,g);bx(.03,.72,.018,gold,s*.07,-.1,0,g)}
+ bx(.26,.12,.016,pc,0,.35,0,g);bx(.03,.6,.03,pc,.25,.3,0,g);bx(.24,.13,.016,M(0x1749b8,.4),.34,.62,0,g);
+ cy(.025,.03,silver,.42,.64,.02,g,'z');bx(.06,.04,.01,M(0x0a0a0a),.3,.64,.012,g);
+ for(let k=0;k<4;k++)bx(.012,.05,.012,gold,.34+(k-1.5)*.04,.52,0,g);
+ pipe([[.06,.41,.012],[.06,.62,.012],[.22,.62,.012]],.008,wm(0xf2c200),g);pipe([[-.06,.41,-.012],[-.06,.74,-.012],[.28,.74,-.012],[.28,.69,-.012]],.008,wm(0xf2c200),g);
+ tag(n,.1,1.0,0,.12,g)}
+soil(1.8,2.5,'Đất 1 → GPIO34');soil(1.8,-2.5,'Đất 2 → GPIO35');
+/* ---------- DHT22 ---------- */
+{const d=new T.Group();d.position.set(0,2.78,.16);S.add(d);bx(.3,.4,.14,M(0xf5f5f1,.45),0,0,0,d);
+ for(let j=0;j<6;j++)bx(.2,.014,.004,M(0x8a8a86,.8),0,-.14+j*.056,.071,d);
+ bx(.36,.1,.03,M(0x101114,.5),0,.25,0,d);for(const k of[-1,0,1])bx(.014,.16,.014,gold,k*.05,.35,0,d);
+ bx(.05,.05,.12,ST,0,2.9,.03);tag('DHT22 → GPIO19',0,-.4,.1,.1,d)}
+/* ---------- quạt đầu hồi ---------- */
+const fans=[];
+function fan(z,ry,n){const g=new T.Group();g.position.set(0,4.5,z);g.rotation.y=ry;S.add(g);const k=M(0x14161a,.4,.5);
+ const sq=new T.Shape();sq.moveTo(-.85,-.85);sq.lineTo(.85,-.85);sq.lineTo(.85,.85);sq.lineTo(-.85,.85);sq.closePath();const h=new T.Path();h.absarc(0,0,.74,0,6.2832,true);sq.holes.push(h);
+ const f=sh(new T.Mesh(new T.ExtrudeGeometry(sq,{depth:.28,bevelEnabled:false,curveSegments:48}),k));f.position.z=-.14;g.add(f);
+ cy(.2,.24,M(0x23262b,.3,.7),0,0,0,g,'z');for(let i=0;i<3;i++){const a=i*2.0944;rod([0,0,-.1],[Math.cos(a)*.74,Math.sin(a)*.74,-.1],.03,k,g)}
+ const bl=new T.Group();bl.position.z=.04;g.add(bl);
+ for(let i=0;i<7;i++){const pv=new T.Group();pv.rotation.z=i*.8976;bl.add(pv);bx(.24,.5,.02,M(0x22262b,.35,.3),0,.46,0,pv).rotation.y=.55}
+ tag(n,0,1.2,0,.2,g);fans.push(bl);bx(.05,.12,.06,M(0xdddddd),.87,4.5,z)}
+fan(4.84,0,'QUẠT 1');fan(-4.84,Math.PI,'QUẠT 2');
+/* ---------- ống nước, bể, bơm ---------- */
+const inM=M(0x2f7fd0,.3,.1),outM=M(0xe4e9ec,.3,.1),brass=M(0xc9a24a,.3,.9),TX=8.8;
+for(const s of[1,-1]){pipe([[7.4,.9,0],[6,.9,0],[6,.9,s*1.66],[6,.8,s*1.66]],.055,inM);
+ pipe([[6,.8,s*1.94],[6,2,s*1.94],[5.22,2,s*1.94],[5.22,2,s*5.22],[5.22,4.03,s*5.22],[.14,6.07,s*5.22],[.14,6.07,s*2.5],[.14,5.6,s*2.5]],.05,outM);
+ cy(.03,.12,brass,.14,5.54,s*2.5);cy(.03,.07,brass,.14,5.46,s*2.5,S,'y',.1)}
+cy(1.5,.12,ST,TX,.2,0);cy(1.4,1.9,M(0xdfeaf2,.12,0,{transparent:true,opacity:.38}),TX,1.3,0);cy(1.33,1.5,M(0x2d8fd9,.15,0,{transparent:true,opacity:.8}),TX,1.1,0);
+for(const y of[.6,1.3,2.0]){const m=sh(new T.Mesh(new T.TorusGeometry(1.41,.04,8,48),ST));m.rotation.x=1.5708;m.position.set(TX,y,0);S.add(m)}
+cy(1.25,.14,M(0xf2f6f9,.3),TX,2.32,0);cy(.35,.1,M(0x1b6fb8,.3),TX,2.42,0);cy(.09,.14,ST,7.4,.9,0,S,'x');tag('BỂ NƯỚC',TX,3,0,.45);
+function pump(pz,n){const g=new T.Group();g.position.set(6.25,0,pz);S.add(g);const w=M(0xf3f3ef,.4);
+ bx(.95,.06,.6,M(0x15171a,.5),.1,.03,0,g);cy(.26,.56,M(0xaeb4ba,.3,.9),.22,.36,0,g,'x');cy(.265,.05,M(0x1b1d20,.5),.52,.36,0,g,'x');cy(.28,.34,w,-.2,.36,0,g,'x');
+ for(const d of[-1,1]){cy(.065,.34,w,-.25,.6,d*.14,g);cy(.085,.05,w,-.25,.78,d*.14,g)}
+ [.07,-.07].forEach((d,i)=>bx(.05,.012,.03,M(i?0x111111:0xdd2222,.4),.58,.36,d,g));tag(n,0,1.2,0,.2,g)}
+pump(1.8,'BƠM 1 · Relay 1');pump(-1.8,'BƠM 2 · Relay 2');
+function adp(z,w,h,d,c,n){bx(w,h,d,M(c,.6),6.5,.1+h/2,z);tag(n,6.5,.1+h+.25,z,.16)}
+adp(4.1,.5,.26,.3,0x15171a,'12V-3A (quạt)');adp(3.75,.4,.2,.28,0x15171a,'5V-2A (bơm)');adp(3.4,.3,.18,.2,0xf2f2f2,'USB 5V (ESP32)');
+/* ---------- hộp điện mica ---------- */
+const G=new T.Group();G.position.set(4.9,2.95,3.4);G.rotation.y=-1.5708;S.add(G);
+bx(2.6,1.8,.03,M(0x25292e,.6),0,0,-.015,G);
+const mica=new T.Mesh(new T.BoxGeometry(2.6,1.8,.8),new T.MeshPhysicalMaterial({color:0xd6efff,transparent:true,opacity:.13,roughness:.04,side:T.DoubleSide,depthWrite:false}));mica.position.z=.4;G.add(mica);
+const ed=new T.LineSegments(new T.EdgesGeometry(new T.BoxGeometry(2.6,1.8,.8)),new T.LineBasicMaterial({color:0xa6dcf0}));ed.position.z=.4;G.add(ed);
+for(const[x,y]of[[-1.2,.8],[1.2,.8],[-1.2,-.8],[1.2,-.8]])cy(.03,.04,silver,x,y,.02,G,'z');
+bx(.08,.2,.06,ST,4.95,3.93,2.35);bx(.08,.2,.06,ST,4.95,3.93,4.45);
+tag('TỦ ĐIỀU KHIỂN',0,1.08,.4,.14,G);
+const bt=(()=>{const c=document.createElement('canvas');c.width=128;c.height=384;const g=c.getContext('2d');g.fillStyle='#ece8dc';g.fillRect(0,0,128,384);g.fillStyle='#d13a3a';g.fillRect(6,0,3,384);g.fillStyle='#3a5bd1';g.fillRect(14,0,3,384);g.fillStyle='#55524a';
+ for(let y=4;y<380;y+=5.9)for(let j=0;j<12;j++)g.fillRect(97-5.9*j,y,3,3);const t=new T.CanvasTexture(c);t.encoding=T.sRGBEncoding;t.anisotropy=8;return t})();
+for(const s of[-1,1]){bx(.5,1.5,.05,M(0xe4e0d2,.5),s*.252,0,.025,G);const f=new T.Mesh(new T.PlaneGeometry(.5,1.5),new T.MeshStandardMaterial({map:bt,roughness:.5}));f.position.set(s*.252,0,.0505);f.scale.x=-s;f.receiveShadow=true;G.add(f)}
+/* ESP32 (cổng USB hướng xuống, ra ngoài hộp) */
+const ey=-.4,Y=i=>ey+.16-i*.023,PL=i=>[-.115,Y(i),.1],PR=i=>[.115,Y(i),.1];
+bx(.26,.47,.014,M(0x0c1d36,.4),0,ey,.093,G);bx(.2,.25,.032,M(0xc9ced2,.25,.95),0,ey+.09,.116,G);bx(.2,.08,.006,M(0x1b1b1b),0,ey+.2,.099,G);
+bx(.11,.075,.04,M(0xaaaaaa,.3,.9),0,ey-.255,.108,G);bx(.05,.05,.01,M(0x111111),0,ey-.12,.1,G);
+for(const d of[-1,1]){bx(.02,.345,.025,M(0x111111),d*.115,ey,.075,G);bx(.045,.045,.025,M(0x333333),d*.07,ey-.2,.105,G);for(let i=0;i<15;i++)bx(.009,.009,.012,gold,d*.115,Y(i),.108,G)}
+tag('ESP32',0,ey+.3,.14,.06,G);
+[[3,'G34'],[4,'G35'],[5,'G32'],[7,'G25'],[13,'GND'],[14,'VIN']].forEach(([i,t])=>tag(t,-.2,Y(i),.12,.026,G));
+[[5,'G19'],[10,'G4'],[13,'GND'],[14,'3V3']].forEach(([i,t])=>tag(t,.2,Y(i),.12,.026,G));
+/* Relay 2 kênh */
+const rx=-.95,ay=.05,led=[0,1].map(()=>M(0x0b3d16,.4,0,{emissive:0x25ff60,emissiveIntensity:0}));
+bx(.64,.5,.014,M(0xb3221d,.5),rx,ay,.1,G);
+for(const d of[-1,1]){bx(.17,.17,.16,M(0x1c52b8,.4),rx+d*.15,ay-.03,.187,G);bx(.2,.1,.1,M(0x1c52b8,.45),rx+d*.15,ay+.18,.157,G);
+ for(const k of[-1,0,1])cy(.022,.012,silver,rx+d*.15+k*.06,ay+.18,.206,G,'z');bx(.035,.02,.012,led[(d+1)/2],rx+d*.09,ay-.16,.113,G)}
+for(let k=0;k<4;k++)bx(.01,.01,.035,gold,rx-.0345+.023*k,ay-.22,.124,G);
+tag('RELAY 2CH',rx,ay+.38,.1,.08,G);
+const RP=k=>[rx-.0345+.023*k,ay-.22,.14],NO1=[rx-.09,ay+.18,.21],COM1=[rx-.15,ay+.18,.21],NO2=[rx+.21,ay+.18,.21],COM2=[rx+.15,ay+.18,.21];
+/* MOSFET */
+const mx=1,my=.05,ledF=M(0x3d2a0b,.4,0,{emissive:0xffa030,emissiveIntensity:0});
+bx(.44,.34,.014,M(0x1347c7,.45),mx,my,.1,G);bx(.1,.13,.04,M(0x0a0a0a,.4),mx,my-.02,.13,G);bx(.11,.05,.012,silver,mx,my+.06,.15,G);bx(.03,.02,.012,ledF,mx+.15,my-.1,.113,G);
+for(const d of[-1,1]){bx(.17,.12,.1,M(0x1b57e6,.4),mx+d*.1,my+.17,.157,G);for(const k of[-1,1])cy(.022,.012,silver,mx+d*.1+k*.035*1,my+.17,.206,G,'z')}
+for(const d of[-1,1])bx(.01,.01,.035,gold,mx+d*.0115,my-.13,.124,G);
+tag('MOSFET',mx,my+.35,.1,.08,G);
+const VINP=[mx-.135,my+.17,.21],VINN=[mx-.065,my+.17,.21],OUTP=[mx+.065,my+.17,.21],OUTN=[mx+.135,my+.17,.21],PWM=[mx-.0115,my-.13,.14],MGND=[mx+.0115,my-.13,.14];
+/* 2 diode */
+function dio(x,n){cy(.022,.1,M(0x0d0d0d,.35),x,.5,.077,G);cy(.0225,.014,silver,x,.535,.077,G);
+ pipe([[x,.55,.077],[x,.58,.077],[x,.58,.052]],.006,silver,G);pipe([[x,.45,.077],[x,.42,.077],[x,.42,.052]],.006,silver,G);tag(n,x,.68,.1,.04,G)}
+dio(-.25,'D1');dio(-.15,'D2');
+/* dây nhảy nội bộ trên breadboard */
+let jn=0;const jw=(a,b,c)=>{const l=Math.max(a[2],b[2])+.02+.008*jn++;pipe([a,[a[0],a[1],l],[b[0],a[1],l],[b[0],b[1],l],b],.008,wm(c),G)};
+const K={r:0xd92b2b,k:0x111111,y:0xf2c200,g:0x2fb344,b:0x2f6bff,p:0x9b4de0,o:0xff8c1a,w:0xf2f2f2};
+jw(PL(14),RP(0),K.r);jw(PL(13),RP(3),K.k);jw(PR(10),RP(1),K.b);jw(PL(7),RP(2),K.p);
+jw(PL(5),PWM,K.o);jw(PL(13),MGND,K.k);jw(COM1,COM2,K.r);
+jw([-.25,.58,.077],NO1,K.r);jw([-.15,.58,.077],NO2,K.r);jw([-.25,.42,.077],PL(13),K.k);jw([-.15,.42,.077],PL(13),K.k);
+/* bó dây ngoài: sensor/quạt/bơm/nguồn → chân linh kiện */
+G.updateMatrixWorld(true);
+const XT=b=>4.9-(.27+.045*b),Yr=x=>4+(5-x)*.4-.13;
+function bun(cols,dev,tr,pins,usb){cols.forEach((c,k)=>{const o=(k-(cols.length-1)/2)*.011,P=tr.map(q=>[q[0]+o,q[1]+o,q[2]+o]),e=P[P.length-1],L=G.worldToLocal(V(e[0],e[1],e[2])),q=pins[k],
+ inn=usb?[[L.x,L.y,L.z],[0,L.y,.1],[0,q[1],.1]]:[[L.x,L.y,L.z],[L.x,q[1],L.z],[q[0],q[1],L.z],[q[0],q[1],q[2]]];
+ pipe([dev[k],...P],usb?.02:.011,wm(c));pipe(inn,usb?.02:.011,wm(c),G)})}
+{let x=XT(0);bun([K.r,K.g,K.k],[[-.05,3.21,.16],[0,3.21,.16],[.05,3.21,.16]],[[0,3.42,.16],[x,3.42,.16],[x,3.98,.16],[x,3.98,3.7],[x,3.85,3.7]],[PR(14),PR(5),PR(13)]);
+ x=XT(1);bun([K.r,K.k,K.y],[[2.08,1.06,2.5],[2.12,1.06,2.5],[2.2,1.06,2.5]],[[2.14,.95,2.5],[2.14,.62,2.5],[x,.62,2.5],[x,2.05,2.5]],[PR(14),PR(13),PL(3)]);
+ x=XT(2);bun([K.r,K.k,K.o],[[2.08,1.06,-2.5],[2.12,1.06,-2.5],[2.2,1.06,-2.5]],[[2.14,.95,-2.5],[2.14,.72,-2.5],[x,.72,-2.5],[x,.72,2.75],[x,2.05,2.75]],[PR(14),PR(13),PL(4)]);
+ x=XT(3);bun([K.r,K.k],[[.89,4.56,4.84],[.89,4.44,4.84]],[[.95,4.5,4.9],[1.2,4.5,4.9],[1.2,Yr(1.2),4.9],[x,Yr(x),4.9],[x,Yr(x),4.2],[x,3.85,4.2]],[OUTP,OUTN]);
+ x=XT(4);bun([K.r,K.k],[[.89,4.56,-4.84],[.89,4.44,-4.84]],[[.95,4.5,-4.9],[1.2,4.5,-4.9],[1.2,Yr(1.2),-4.9],[x,Yr(x),-4.9],[x,Yr(x),3.95],[x,3.85,3.95]],[OUTP,OUTN]);
+ x=XT(5);bun([K.r,K.k],[[6.86,.36,1.87],[6.86,.36,1.73]],[[6.95,.3,1.8],[5.45,.3,1.8],[5.45,.3,3],[x,.3,3],[x,2.05,3]],[NO1,PL(13)]);
+ x=XT(6);bun([K.r,K.k],[[6.86,.36,-1.73],[6.86,.36,-1.87]],[[6.95,.3,-1.8],[5.6,.3,-1.8],[5.6,.3,3.25],[x,.3,3.25],[x,2.05,3.25]],[NO2,PL(13)]);
+ x=XT(7);bun([K.r,K.k],[[6.25,.23,4.1],[6.25,.23,4.1]],[[6.1,.25,4.1],[x,.25,4.1],[x,2.05,4.1]],[VINP,VINN]);
+ x=XT(8);bun([K.r,K.k],[[6.3,.2,3.75],[6.3,.2,3.75]],[[6.1,.25,3.75],[x,.25,3.75],[x,2.05,3.75]],[COM1,PL(13)]);
+ x=XT(9);bun([K.w],[[6.35,.19,3.4]],[[6.1,.25,3.4],[x,.25,3.4],[x,2.05,3.4]],[[0,-.68,.1]],1)}
+/* ---------- hạt phun sương ---------- */
+const NP=260,sprays=[1,-1].map(s=>{const a=new Float32Array(NP*3),g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(a,3));
+ const pt=new T.Points(g,new T.PointsMaterial({color:0xe6f7ff,size:.06,transparent:true,opacity:.8,depthWrite:false}));pt.frustumCulled=false;S.add(pt);
+ return{pt,a,s,d:Array.from({length:NP},()=>({t:Math.random()*.95,w:Math.random()*6.283,v:.5+Math.random()*1.7}))}});
+/* ---------- UI & vòng lặp ---------- */
+let goal=null;const views={'Tổng quan':[[16,9,18],[2,2.5,0]],'Tủ điều khiển':[[1,3,3.5],[4.6,2.95,3.5]],'Bể & bơm':[[13,4.5,6],[7.6,.9,0]],'Quạt mái':[[0,5.2,10.5],[0,4.5,5]]};
+Object.keys(views).forEach(k=>{const b=document.createElement('button');b.textContent=k;b.onclick=()=>goal={p:V(...views[k][0]),t:V(...views[k][1])};$('nav').appendChild(b)});
+addEventListener('resize',()=>{R.setSize(BW(),BH());C.aspect=BW()/BH();C.updateProjectionMatrix()});
+const clk=new T.Clock();let spd=0;
+(function loop(){requestAnimationFrame(loop);const dt=Math.min(clk.getDelta(),.05),tm=+$('rt').value,a=[+$('r1').value,+$('r2').value],on=a.map(v=>v<35),duty=Math.max(0,Math.min(1,(tm-28)/10));
+ $('vt').textContent=tm+'°C';$('v1').textContent=a[0]+'%';$('v2').textContent=a[1]+'%';
+ $('out').textContent=`Quạt PWM (GPIO32): ${Math.round(duty*100)}%\nBơm 1 (Relay GPIO4): ${on[0]?'BẬT':'TẮT'}\nBơm 2 (Relay GPIO25): ${on[1]?'BẬT':'TẮT'}`;
+ spd+=(duty*16-spd)*Math.min(1,dt*2.5);fans.forEach(f=>f.rotation.z-=spd*dt);
+ led.forEach((m,i)=>m.emissiveIntensity=on[i]?2.5:0);ledF.emissiveIntensity=duty*2.5;
+ sprays.forEach((q,k)=>{q.pt.visible=on[k];if(!on[k])return;q.d.forEach((p,i)=>{p.t+=dt;if(p.t>.95)p.t-=.95;const t=p.t;
+  q.a[i*3]=.14+Math.cos(p.w)*p.v*t*1.1;q.a[i*3+1]=5.45-2.2*t-2.8*t*t;q.a[i*3+2]=q.s*2.5+Math.sin(p.w)*p.v*t*1.1});q.pt.geometry.attributes.position.needsUpdate=true});
+ if(goal){C.position.lerp(goal.p,.07);O.target.lerp(goal.t,.07);if(C.position.distanceTo(goal.p)<.03)goal=null}
+ O.update();R.render(S,C)})();
+</script></body></html>
